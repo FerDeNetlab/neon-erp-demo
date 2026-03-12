@@ -19,11 +19,17 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      await authClient.signIn.email({ email, password })
+      const result = await authClient.signIn.email({ email, password })
+      if (result.error) {
+        setError(result.error.message || 'Credenciales incorrectas. Intenta de nuevo.')
+        setLoading(false)
+        return
+      }
       router.push('/')
       router.refresh()
-    } catch {
-      setError('Credenciales incorrectas. Intenta de nuevo.')
+    } catch (err) {
+      console.error('Login error:', err)
+      setError('Error de conexión. Intenta de nuevo.')
     } finally {
       setLoading(false)
     }
