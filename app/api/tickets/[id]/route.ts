@@ -15,8 +15,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
     const evidencias = await sql`SELECT * FROM evidencias WHERE ticket_id = ${id} ORDER BY created_at DESC`
     const incidencias = await sql`SELECT * FROM incidencias WHERE ticket_id = ${id} ORDER BY created_at DESC`
+    const materiales_asignados = await sql`SELECT * FROM asignaciones_material WHERE ticket_id = ${id} ORDER BY created_at DESC`
 
-    return NextResponse.json({ ...ticket[0], evidencias, incidencias })
+    return NextResponse.json({ ...ticket[0], evidencias, incidencias, materiales_asignados })
   } catch (error) {
     console.error('[API] Error fetching ticket:', error)
     return NextResponse.json({ error: 'Error al obtener ticket' }, { status: 500 })

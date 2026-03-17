@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, MapPin, Clock, Calendar, User, Camera, Plus, X, Loader2,
-  AlertTriangle, CheckCircle2, PlayCircle, Send, Upload, FileText
+  AlertTriangle, CheckCircle2, PlayCircle, Send, Upload, FileText, Package, Hash
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -15,6 +15,7 @@ type TicketDetail = {
   direccion: string; ciudad: string; fecha_programada: string; asignado_nombre: string; notas: string
   evidencias: Array<{ id: string; tipo: string; url: string; descripcion: string; created_at: string }>
   incidencias: Array<{ id: string; tipo: string; severidad: string; descripcion: string; estado: string; created_at: string }>
+  materiales_asignados: Array<{ id: string; nombre_material: string; cantidad: number; unidad: string; numero_serie: string; estado: string; notas: string; fecha_asignacion: string }>
 }
 
 const tipoIcons: Record<string, string> = { fibra: '🔌', cctv: '📹', cableado: '🔗', servidor: '🖥️', otro: '🔧' }
@@ -130,6 +131,46 @@ export default function TecnicoTicketPage() {
           className="flex items-center justify-center gap-2 px-4 py-3.5 bg-red-600/20 border border-red-500/50 text-red-400 hover:bg-red-600/30 rounded-xl text-sm font-medium transition-all">
           <AlertTriangle className="h-5 w-5" /> Reportar Incidencia
         </button>
+      </motion.div>
+
+      {/* Materials section */}
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}
+        className="bg-zinc-900/50 border border-purple-500/20 rounded-xl p-5">
+        <h2 className="text-sm font-medium text-purple-400 mb-3 flex items-center gap-2"><Package className="h-4 w-4" /> Material Asignado ({ticket.materiales_asignados?.length || 0})</h2>
+        {!ticket.materiales_asignados || ticket.materiales_asignados.length === 0 ? (
+          <p className="text-xs text-slate-500 py-6 text-center">Sin material asignado para este ticket</p>
+        ) : (
+          <div className="space-y-2">
+            {ticket.materiales_asignados.map(mat => {
+              const estadoMat: Record<string, { label: string; color: string }> = {
+                asignado: { label: 'Por recoger', color: 'text-yellow-400 bg-yellow-400/10 border-yellow-500/30' },
+                entregado: { label: 'Entregado', color: 'text-green-400 bg-green-400/10 border-green-500/30' },
+                devuelto: { label: 'Devuelto', color: 'text-blue-400 bg-blue-400/10 border-blue-500/30' },
+                consumido: { label: 'Consumido', color: 'text-slate-400 bg-slate-400/10 border-slate-500/30' },
+              }
+              const est = estadoMat[mat.estado] || estadoMat.asignado
+              return (
+                <div key={mat.id} className="flex items-center gap-3 bg-zinc-800/50 border border-slate-700/50 rounded-lg p-3">
+                  <div className="p-1.5 rounded-lg bg-purple-400/10 flex-shrink-0"><Package className="h-4 w-4 text-purple-400" /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm text-slate-200 font-medium">{mat.nombre_material}</p>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] border ${est.color}`}>{est.label}</span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                      <span>{Number(mat.cantidad)} {mat.unidad}</span>
+                      {mat.numero_serie && (
+                        <span className="flex items-center gap-1 text-purple-400 font-mono bg-purple-400/5 px-1.5 py-0.5 rounded">
+                          <Hash className="h-3 w-3" />S/N: {mat.numero_serie}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </motion.div>
 
       {/* Evidence section */}
