@@ -19,6 +19,7 @@ import {
   Menu,
   X,
   ChevronLeft,
+  HardHat,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -32,6 +33,7 @@ const modules = [
   { label: 'Flota', icon: Truck, href: '/flota', color: 'text-yellow-400', bgColor: 'bg-yellow-400/10' },
   { label: 'Ventas', icon: ShoppingCart, href: '/ventas', color: 'text-emerald-400', bgColor: 'bg-emerald-400/10' },
   { label: 'Facturación', icon: Receipt, href: '/facturacion', color: 'text-lime-400', bgColor: 'bg-lime-400/10' },
+  { label: 'Portal Técnico', icon: HardHat, href: '/tecnico', color: 'text-cyan-400', bgColor: 'bg-cyan-400/10' },
   { label: 'Ajustes', icon: Settings, href: '/ajustes', color: 'text-gray-400', bgColor: 'bg-gray-400/10' },
 ]
 
