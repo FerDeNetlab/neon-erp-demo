@@ -1,6 +1,7 @@
 'use client'
 
 import Sidebar from '@/components/sidebar'
+import ProductTour from '@/components/product-tour'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 
@@ -28,6 +29,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
+      <ProductTour />
     </div>
   )
 }
+

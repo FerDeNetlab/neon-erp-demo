@@ -79,7 +79,7 @@ export default function OrdenesPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div data-tour="ordenes-list" className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>

@@ -28,7 +28,7 @@ const modules: Module[] = [
   { label: 'Documentos', icon: FileText, href: '/documentos', color: 'text-amber-400', bgColor: 'bg-amber-400/10' },
   { label: 'Sucursales', icon: Building2, href: '/sucursales', color: 'text-rose-400', bgColor: 'bg-rose-400/10', roles: ['admin'] },
   { label: 'Portal Técnico', icon: HardHat, href: '/tecnico', color: 'text-cyan-300', bgColor: 'bg-cyan-300/10', roles: ['installer'] },
-  { label: 'Reportes', icon: BarChart3, href: '/reportes', color: 'text-violet-400', bgColor: 'bg-violet-400/10', roles: ['admin', 'manager'] },
+  { label: 'Directivo', icon: BarChart3, href: '/directivo', color: 'text-violet-400', bgColor: 'bg-violet-400/10', roles: ['admin', 'manager'] },
   { label: 'Usuarios', icon: Shield, href: '/usuarios', color: 'text-gray-400', bgColor: 'bg-gray-400/10', roles: ['admin'] },
 ]
 

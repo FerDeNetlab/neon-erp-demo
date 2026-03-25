@@ -82,7 +82,7 @@ export default function DashboardPage() {
       </motion.div>
 
       {/* KPI Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+      <div data-tour="dashboard-kpis" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
         <KpiCard icon={ClipboardList} label="Órdenes Activas" value={fmt(k.active_orders)} sub={`${fmt(k.urgent)} urgentes`} color="bg-blue-500/10 text-blue-400" delay={0} />
         <KpiCard icon={Activity} label="En Progreso" value={fmt(k.in_progress)} sub={`${fmt(k.completed_week)} completadas esta semana`} color="bg-amber-500/10 text-amber-400" delay={0.05} />
         <KpiCard icon={AlertTriangle} label="Incidencias" value={fmt(k.open_incidents)} sub={`${fmt(k.critical_incidents)} críticas`} color="bg-red-500/10 text-red-400" delay={0.1} />
