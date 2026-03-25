@@ -60,13 +60,20 @@ function BarSimple({ data, maxVal }: { data: Array<{label: string; value: number
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch('/api/dashboard').then(r => r.json()).then(setData).finally(() => setLoading(false))
+    fetch('/api/dashboard').then(r => {
+      if (!r.ok) {
+        if (r.status === 401 || r.status === 403) { window.location.href = '/login'; return null }
+        throw new Error('Error al cargar')
+      }
+      return r.json()
+    }).then(d => { if (d) setData(d) }).catch(e => setError(e.message)).finally(() => setLoading(false))
   }, [])
 
   if (loading) return <div className="flex items-center justify-center py-32"><Loader2 className="h-8 w-8 animate-spin text-cyan-400" /></div>
-  if (!data) return <div className="text-center py-20 text-slate-400">Error al cargar dashboard</div>
+  if (error || !data) return <div className="text-center py-20 text-slate-400">{error || 'Error al cargar dashboard'}</div>
 
   const k = data.kpis
   const maxOrders = Math.max(...(data.charts.ordersByStatus?.map(o => Number(o.count)) || [1]))

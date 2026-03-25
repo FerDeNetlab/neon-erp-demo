@@ -7,7 +7,8 @@ export default auth.middleware({
 
 export const config = {
   matcher: [
-    // Protect everything except login, API auth, static assets
-    '/((?!login|api/auth|_next/static|_next/image|favicon.ico|icon\\.svg|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    // Protect everything except login, API auth, demo-setup, static assets
+    '/((?!login|api/auth|api/demo-setup|_next/static|_next/image|favicon.ico|icon\\.svg|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 }
+
