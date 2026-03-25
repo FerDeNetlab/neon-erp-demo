@@ -1,275 +1,198 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import {
-  ClipboardList, Camera, AlertTriangle, Truck, Receipt, TrendingUp,
-  Users, Package, Wrench, ShoppingCart, Loader2, ArrowDown, DollarSign,
-  Fuel, AlertCircle, Clock, CheckCircle2, BarChart3
+  ClipboardList, AlertTriangle, Truck, Wrench, Package, Users,
+  DollarSign, TrendingUp, Loader2, Flame, BarChart3, Activity
 } from 'lucide-react'
 
-type DashData = {
-  tickets: { byEstado: { estado: string; count: number }[]; byType: { tipo: string; count: number }[]; byPriority: { prioridad: string; count: number }[]; byCity: { ciudad: string; count: number }[] }
-  incidencias: { byEstado: { estado: string; count: number }[]; bySeverity: { severidad: string; count: number }[] }
-  evidencias: { total: number }
-  activos: { byEstado: { estado: string; count: number }[]; valorTotal: number }
-  materiales: { total: number; lowStock: { nombre: string; stock_actual: number; stock_minimo: number }[] }
-  flota: { byEstado: { estado: string; count: number }[]; gastoCombustible: number; gastoMantenimiento: number; gastoMultas: number; multasPendientes: number }
-  ventas: { byEstado: { estado: string; count: number }[]; totalAceptadas: number }
-  facturacion: { byEstado: { estado: string; count: number }[]; porCobrar: number; cobrado: number; monthlyRevenue: { mes: string; total: number }[] }
-  recentTickets: { numero_ticket: string; titulo: string; estado: string; created_at: string }[]
-  totalUsuarios: number
+type DashboardData = {
+  user: { role: string }
+  kpis: Record<string, number>
+  charts: { ordersByStatus: Array<{status: string; count: number}>; ordersByType: Array<{service_type: string; count: number}>; ordersByBranch: Array<{branch: string; count: number}> }
+  fleet: { fuel_cost: number; maint_cost: number; fines_cost: number }
+  recentOrders: Array<Record<string, unknown>>
+  recentIncidents: Array<Record<string, unknown>>
 }
 
-const fmt = (n: number) => n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const getCount = (arr: { estado?: string; count: number }[], key: string) => arr.find(i => i.estado === key)?.count || 0
+const statusLabels: Record<string, string> = { created: 'Creada', assigned: 'Asignada', in_progress: 'En Progreso', completed: 'Completada', closed: 'Cerrada' }
+const statusColors: Record<string, string> = { created: 'bg-slate-500', assigned: 'bg-blue-500', in_progress: 'bg-amber-500', completed: 'bg-green-500', closed: 'bg-gray-600' }
+const typeLabels: Record<string, string> = { fibra: 'Fibra Óptica', cctv: 'CCTV', cableado: 'Cableado', servidor: 'Servidores', otro: 'Otro' }
+const typeIcons: Record<string, string> = { fibra: '🔌', cctv: '📹', cableado: '🔗', servidor: '🖥️', otro: '🔧' }
+const prioColors: Record<string, string> = { urgent: 'text-red-400 bg-red-500/10 border-red-500/30', high: 'text-orange-400 bg-orange-500/10 border-orange-500/30', medium: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30', low: 'text-slate-400 bg-slate-500/10 border-slate-500/30' }
+
+function fmt(n: number | string) { return Number(n).toLocaleString('es-MX') }
+function fmtMoney(n: number | string) { return '$' + Number(n).toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) }
+
+function KpiCard({ icon: Icon, label, value, sub, color, delay = 0 }: { icon: typeof ClipboardList; label: string; value: string; sub?: string; color: string; delay?: number }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}
+      className="bg-zinc-900/60 border border-slate-800/50 rounded-xl p-4 hover:border-slate-700/50 transition-colors">
+      <div className="flex items-start justify-between mb-2">
+        <div className={`p-2 rounded-lg ${color}`}><Icon className="h-4 w-4" /></div>
+      </div>
+      <p className="text-2xl font-bold text-white tracking-tight">{value}</p>
+      <p className="text-xs text-slate-500 mt-0.5">{label}</p>
+      {sub && <p className="text-[10px] text-slate-600 mt-1">{sub}</p>}
+    </motion.div>
+  )
+}
+
+function BarSimple({ data, maxVal }: { data: Array<{label: string; value: number; color: string}>; maxVal: number }) {
+  return (
+    <div className="space-y-2">
+      {data.map((d, i) => (
+        <div key={i} className="flex items-center gap-3">
+          <span className="text-xs text-slate-400 w-24 truncate">{d.label}</span>
+          <div className="flex-1 h-5 bg-slate-800/50 rounded-full overflow-hidden">
+            <motion.div initial={{ width: 0 }} animate={{ width: `${maxVal > 0 ? (d.value / maxVal) * 100 : 0}%` }}
+              transition={{ delay: 0.2 + i * 0.05, duration: 0.5 }}
+              className={`h-full rounded-full ${d.color}`} />
+          </div>
+          <span className="text-xs font-medium text-slate-300 w-8 text-right">{d.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export default function DashboardPage() {
-  const [data, setData] = useState<DashData | null>(null)
+  const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const fetchData = useCallback(async () => {
-    try {
-      const res = await fetch('/api/dashboard')
-      const d = await res.json()
-      setData(d)
-    } catch (e) { console.error(e) } finally { setLoading(false) }
+  useEffect(() => {
+    fetch('/api/dashboard').then(r => r.json()).then(setData).finally(() => setLoading(false))
   }, [])
-  useEffect(() => { fetchData() }, [fetchData])
 
-  if (loading) return <div className="flex items-center justify-center py-32"><Loader2 className="h-8 w-8 animate-spin text-green-400" /></div>
-  if (!data) return <div className="text-center py-20 text-slate-400">Error al cargar datos</div>
+  if (loading) return <div className="flex items-center justify-center py-32"><Loader2 className="h-8 w-8 animate-spin text-cyan-400" /></div>
+  if (!data) return <div className="text-center py-20 text-slate-400">Error al cargar dashboard</div>
 
-  const totalTickets = data.tickets.byEstado.reduce((s, i) => s + i.count, 0)
-  const ticketsActivos = getCount(data.tickets.byEstado, 'pendiente') + getCount(data.tickets.byEstado, 'en_progreso')
-  const ticketsCompletos = getCount(data.tickets.byEstado, 'completado')
-  const incAbiertas = getCount(data.incidencias.byEstado, 'abierta') + getCount(data.incidencias.byEstado, 'en_revision')
-  const totalVehiculos = data.flota.byEstado.reduce((s, i) => s + i.count, 0)
-  const totalFacturas = data.facturacion.byEstado.reduce((s, i) => s + i.count, 0)
+  const k = data.kpis
+  const maxOrders = Math.max(...(data.charts.ordersByStatus?.map(o => Number(o.count)) || [1]))
+  const maxTypes = Math.max(...(data.charts.ordersByType?.map(o => Number(o.count)) || [1]))
+  const margin = Number(k.total_revenue) - Number(k.total_costs)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="space-y-1">
-        <h1 className="text-2xl font-bold text-green-400">Dashboard</h1>
-        <p className="text-sm text-slate-500">
-          Panel de control • {new Date().toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-        </p>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+        <h1 className="text-2xl font-black text-white tracking-tight">Dashboard</h1>
+        <p className="text-sm text-slate-500">Vista general de Redes Ópticas</p>
       </motion.div>
 
-      {/* KPI Row 1 — Top level */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[
-          { title: 'Tickets Activos', value: String(ticketsActivos), icon: ClipboardList, color: 'text-cyan-400', bg: 'bg-cyan-400/10', border: 'border-cyan-500/20' },
-          { title: 'Evidencias', value: String(data.evidencias.total), icon: Camera, color: 'text-blue-400', bg: 'bg-blue-400/10', border: 'border-blue-500/20' },
-          { title: 'Incidencias', value: String(incAbiertas), icon: AlertTriangle, color: 'text-red-400', bg: 'bg-red-400/10', border: 'border-red-500/20' },
-          { title: 'Vehículos', value: String(totalVehiculos), icon: Truck, color: 'text-yellow-400', bg: 'bg-yellow-400/10', border: 'border-yellow-500/20' },
-          { title: 'Empleados', value: String(data.totalUsuarios), icon: Users, color: 'text-purple-400', bg: 'bg-purple-400/10', border: 'border-purple-500/20' },
-          { title: 'Materiales', value: String(data.materiales.total), icon: Package, color: 'text-orange-400', bg: 'bg-orange-400/10', border: 'border-orange-500/20' },
-        ].map((stat, i) => (
-          <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
-            className={`bg-zinc-900/50 border ${stat.border} rounded-lg p-4 hover:scale-[1.03] transition-transform cursor-default`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider">{stat.title}</span>
-              <div className={`p-1.5 rounded-md ${stat.bg}`}><stat.icon className={`h-3.5 w-3.5 ${stat.color}`} /></div>
-            </div>
-            <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
-          </motion.div>
-        ))}
+      {/* KPI Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+        <KpiCard icon={ClipboardList} label="Órdenes Activas" value={fmt(k.active_orders)} sub={`${fmt(k.urgent)} urgentes`} color="bg-blue-500/10 text-blue-400" delay={0} />
+        <KpiCard icon={Activity} label="En Progreso" value={fmt(k.in_progress)} sub={`${fmt(k.completed_week)} completadas esta semana`} color="bg-amber-500/10 text-amber-400" delay={0.05} />
+        <KpiCard icon={AlertTriangle} label="Incidencias" value={fmt(k.open_incidents)} sub={`${fmt(k.critical_incidents)} críticas`} color="bg-red-500/10 text-red-400" delay={0.1} />
+        <KpiCard icon={Package} label="Stock Bajo" value={fmt(k.low_stock)} sub={`de ${fmt(k.total_items)} productos`} color="bg-orange-500/10 text-orange-400" delay={0.15} />
+        <KpiCard icon={Truck} label="Vehículos" value={fmt(k.active_vehicles)} sub={`${fmt(k.vehicles_in_shop)} en taller · ${fmt(k.insurance_alerts)} alertas seguro`} color="bg-yellow-500/10 text-yellow-400" delay={0.2} />
+        <KpiCard icon={Wrench} label="Herramientas" value={`${fmt(k.tools_assigned)}/${fmt(k.tools_total)}`} sub={`${fmt(k.tools_maintenance)} en mantenimiento`} color="bg-purple-500/10 text-purple-400" delay={0.25} />
+        <KpiCard icon={Users} label="Empleados" value={fmt(k.total_employees)} color="bg-teal-500/10 text-teal-400" delay={0.3} />
+        <KpiCard icon={DollarSign} label="Gastos del Mes" value={fmtMoney(k.expenses_month)} color="bg-rose-500/10 text-rose-400" delay={0.35} />
+        <KpiCard icon={TrendingUp} label="Ingresos (ord. cerradas)" value={fmtMoney(k.total_revenue)} sub={`Costos: ${fmtMoney(k.total_costs)}`} color="bg-emerald-500/10 text-emerald-400" delay={0.4} />
+        <KpiCard icon={BarChart3} label="Margen" value={fmtMoney(margin)} sub={Number(k.total_revenue) > 0 ? `${Math.round(margin / Number(k.total_revenue) * 100)}%` : '—'} color={margin >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'} delay={0.45} />
       </div>
 
-      {/* KPI Row 2 — Financial */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {[
-          { title: 'Por Cobrar', value: `$${fmt(data.facturacion.porCobrar)}`, icon: Clock, color: 'text-yellow-400', border: 'border-yellow-500/20' },
-          { title: 'Cobrado', value: `$${fmt(data.facturacion.cobrado)}`, icon: CheckCircle2, color: 'text-green-400', border: 'border-green-500/20' },
-          { title: 'Cotizaciones Ganaadas', value: `$${fmt(data.ventas.totalAceptadas)}`, icon: TrendingUp, color: 'text-emerald-400', border: 'border-emerald-500/20' },
-          { title: 'Valor Activos', value: `$${fmt(data.activos.valorTotal)}`, icon: Wrench, color: 'text-orange-400', border: 'border-orange-500/20' },
-        ].map((stat, i) => (
-          <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.06 }}
-            className={`bg-zinc-900/50 border ${stat.border} rounded-lg p-4`}>
-            <div className="flex items-center gap-2 mb-2"><stat.icon className={`h-4 w-4 ${stat.color}`} /><span className="text-xs text-slate-400">{stat.title}</span></div>
-            <p className={`text-xl font-bold ${stat.color}`}>{stat.value}</p>
-          </motion.div>
-        ))}
+      {/* Charts Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Orders by Status */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+          className="bg-zinc-900/60 border border-slate-800/50 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2"><ClipboardList className="h-4 w-4 text-blue-400" /> Órdenes por Estado</h3>
+          <BarSimple maxVal={maxOrders}
+            data={(data.charts.ordersByStatus || []).map(o => ({ label: statusLabels[o.status] || o.status, value: Number(o.count), color: statusColors[o.status] || 'bg-slate-500' }))} />
+        </motion.div>
+
+        {/* Orders by Type */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
+          className="bg-zinc-900/60 border border-slate-800/50 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2"><BarChart3 className="h-4 w-4 text-cyan-400" /> Órdenes por Tipo</h3>
+          <BarSimple maxVal={maxTypes}
+            data={(data.charts.ordersByType || []).map(o => ({ label: `${typeIcons[o.service_type] || '🔧'} ${typeLabels[o.service_type] || o.service_type}`, value: Number(o.count), color: 'bg-cyan-500' }))} />
+        </motion.div>
+
+        {/* Orders by Branch */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+          className="bg-zinc-900/60 border border-slate-800/50 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2"><Flame className="h-4 w-4 text-orange-400" /> Órdenes por Sucursal</h3>
+          <BarSimple maxVal={Math.max(...(data.charts.ordersByBranch?.map(o => Number(o.count)) || [1]))}
+            data={(data.charts.ordersByBranch || []).map((o, i) => ({ label: String(o.branch), value: Number(o.count), color: ['bg-blue-500', 'bg-emerald-500', 'bg-purple-500'][i] || 'bg-slate-500' }))} />
+        </motion.div>
       </div>
 
-      {/* Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-        {/* Tickets by Status */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
-          className="bg-zinc-900/50 border border-slate-800 rounded-lg p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2"><BarChart3 className="h-4 w-4 text-cyan-400" /> Tickets por Estado</h2>
+      {/* Fleet Costs + Recent */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Fleet costs */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+          className="bg-zinc-900/60 border border-slate-800/50 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2"><Truck className="h-4 w-4 text-yellow-400" /> Costos Flotilla (90 días)</h3>
           <div className="space-y-3">
             {[
-              { key: 'pendiente', label: 'Pendientes', color: 'bg-yellow-400' },
-              { key: 'en_progreso', label: 'En Progreso', color: 'bg-blue-400' },
-              { key: 'completado', label: 'Completados', color: 'bg-green-400' },
-              { key: 'cancelado', label: 'Cancelados', color: 'bg-red-400' },
-            ].map(s => {
-              const count = getCount(data.tickets.byEstado, s.key)
-              const pct = totalTickets > 0 ? (count / totalTickets) * 100 : 0
-              return (
-                <div key={s.key}>
-                  <div className="flex justify-between text-xs mb-1"><span className="text-slate-400">{s.label}</span><span className="text-slate-200 font-mono">{count}</span></div>
-                  <div className="h-2 rounded-full bg-slate-800 overflow-hidden"><div className={`h-full rounded-full ${s.color} transition-all duration-1000`} style={{ width: `${pct}%` }} /></div>
-                </div>
-              )
-            })}
-          </div>
-        </motion.div>
-
-        {/* Tickets by Type */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }}
-          className="bg-zinc-900/50 border border-slate-800 rounded-lg p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2"><ClipboardList className="h-4 w-4 text-cyan-400" /> Tickets por Tipo</h2>
-          <div className="space-y-3">
-            {data.tickets.byType.map(t => {
-              const pct = totalTickets > 0 ? (t.count / totalTickets) * 100 : 0
-              const colors: Record<string, string> = { fibra: 'bg-cyan-400', cctv: 'bg-purple-400', cableado: 'bg-blue-400', servidor: 'bg-orange-400', otro: 'bg-slate-400' }
-              return (
-                <div key={t.tipo}>
-                  <div className="flex justify-between text-xs mb-1"><span className="text-slate-400 capitalize">{t.tipo}</span><span className="text-slate-200 font-mono">{t.count}</span></div>
-                  <div className="h-2 rounded-full bg-slate-800 overflow-hidden"><div className={`h-full rounded-full ${colors[t.tipo] || 'bg-slate-400'} transition-all duration-1000`} style={{ width: `${pct}%` }} /></div>
-                </div>
-              )
-            })}
-          </div>
-        </motion.div>
-
-        {/* Gastos de Flota */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7 }}
-          className="bg-zinc-900/50 border border-slate-800 rounded-lg p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2"><Truck className="h-4 w-4 text-yellow-400" /> Gastos de Flota</h2>
-          <div className="space-y-4">
-            {[
-              { label: 'Combustible', value: data.flota.gastoCombustible, icon: Fuel, color: 'text-green-400' },
-              { label: 'Mantenimiento', value: data.flota.gastoMantenimiento, icon: Wrench, color: 'text-blue-400' },
-              { label: 'Multas', value: data.flota.gastoMultas, icon: AlertTriangle, color: 'text-red-400', extra: data.flota.multasPendientes > 0 ? `(${data.flota.multasPendientes} pendientes)` : '' },
-            ].map(g => (
-              <div key={g.label} className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-slate-800"><g.icon className={`h-4 w-4 ${g.color}`} /></div>
-                  <div>
-                    <p className="text-sm text-slate-200">{g.label}</p>
-                    {g.extra && <p className="text-xs text-red-400">{g.extra}</p>}
-                  </div>
-                </div>
-                <span className={`text-lg font-bold ${g.color}`}>${fmt(g.value)}</span>
+              { label: '⛽ Combustible', val: data.fleet.fuel_cost, color: 'text-yellow-400' },
+              { label: '🔧 Mantenimiento', val: data.fleet.maint_cost, color: 'text-blue-400' },
+              { label: '🚫 Multas', val: data.fleet.fines_cost, color: 'text-red-400' },
+            ].map((f, i) => (
+              <div key={i} className="flex justify-between items-center">
+                <span className="text-sm text-slate-400">{f.label}</span>
+                <span className={`text-sm font-semibold ${f.color}`}>{fmtMoney(f.val)}</span>
               </div>
             ))}
-            <div className="pt-3 border-t border-slate-800 flex justify-between">
-              <span className="text-sm text-slate-400">Total Flota</span>
-              <span className="text-lg font-bold text-yellow-400">${fmt(data.flota.gastoCombustible + data.flota.gastoMantenimiento + data.flota.gastoMultas)}</span>
+            <div className="border-t border-slate-800 pt-2 flex justify-between">
+              <span className="text-sm text-slate-300 font-medium">Total</span>
+              <span className="text-sm font-bold text-white">{fmtMoney(Number(data.fleet.fuel_cost) + Number(data.fleet.maint_cost) + Number(data.fleet.fines_cost))}</span>
             </div>
           </div>
         </motion.div>
 
-        {/* Facturación mensual */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}
-          className="bg-zinc-900/50 border border-slate-800 rounded-lg p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2"><DollarSign className="h-4 w-4 text-lime-400" /> Ingresos por Mes</h2>
-          {data.facturacion.monthlyRevenue.length === 0 ? (
-            <p className="text-sm text-slate-500 py-4 text-center">Sin datos de ingresos mensuales</p>
-          ) : (
-            <div className="space-y-3">
-              {data.facturacion.monthlyRevenue.map(m => {
-                const maxVal = Math.max(...data.facturacion.monthlyRevenue.map(r => Number(r.total)))
-                const pct = maxVal > 0 ? (Number(m.total) / maxVal) * 100 : 0
-                return (
-                  <div key={m.mes}>
-                    <div className="flex justify-between text-xs mb-1"><span className="text-slate-400">{m.mes}</span><span className="text-lime-400 font-mono font-medium">${fmt(Number(m.total))}</span></div>
-                    <div className="h-2 rounded-full bg-slate-800 overflow-hidden"><div className="h-full rounded-full bg-lime-400 transition-all duration-1000" style={{ width: `${pct}%` }} /></div>
+        {/* Recent Orders */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}
+          className="bg-zinc-900/60 border border-slate-800/50 rounded-xl p-5 lg:col-span-2">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2"><ClipboardList className="h-4 w-4 text-blue-400" /> Órdenes Recientes</h3>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {(data.recentOrders || []).map((o, i) => (
+              <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-zinc-800/30 hover:bg-zinc-800/60 transition-colors">
+                <span className="text-lg">{typeIcons[String(o.service_type)] || '🔧'}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-cyan-400">{String(o.order_number)}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] border ${statusColors[String(o.status)] ? 'text-white' : 'text-slate-400'} ${prioColors[String(o.priority)]?.split(' ').slice(1).join(' ') || ''}`}>{String(o.priority)}</span>
                   </div>
-                )
-              })}
-            </div>
-          )}
-        </motion.div>
-
-        {/* Material bajo stock */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.9 }}
-          className="bg-zinc-900/50 border border-slate-800 rounded-lg p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2"><AlertCircle className="h-4 w-4 text-red-400" /> Materiales con Stock Bajo</h2>
-          {data.materiales.lowStock.length === 0 ? (
-            <p className="text-sm text-green-400 py-4 text-center">✓ Todos los materiales tienen stock suficiente</p>
-          ) : (
-            <div className="space-y-2">
-              {data.materiales.lowStock.map((m, i) => (
-                <div key={i} className="flex items-center justify-between bg-red-500/5 border border-red-500/10 rounded-md px-3 py-2">
-                  <div className="flex items-center gap-2"><ArrowDown className="h-3 w-3 text-red-400" /><span className="text-sm text-slate-200">{m.nombre}</span></div>
-                  <div className="text-xs"><span className="text-red-400 font-bold">{Number(m.stock_actual)}</span><span className="text-slate-500"> / {Number(m.stock_minimo)} min</span></div>
+                  <p className="text-sm text-slate-200 truncate">{String(o.title)}</p>
+                  <p className="text-[10px] text-slate-500">{String(o.client_name)} · {String(o.branch_name)}</p>
                 </div>
-              ))}
-            </div>
-          )}
-        </motion.div>
-
-        {/* Recent Tickets */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.0 }}
-          className="bg-zinc-900/50 border border-slate-800 rounded-lg p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2"><Receipt className="h-4 w-4 text-cyan-400" /> Últimos Tickets</h2>
-          <div className="space-y-2">
-            {data.recentTickets.map(t => {
-              const estadoColors: Record<string, string> = { pendiente: 'text-yellow-400', en_progreso: 'text-blue-400', completado: 'text-green-400', cancelado: 'text-red-400' }
-              return (
-                <div key={t.numero_ticket} className="flex items-center justify-between py-1.5 border-b border-slate-800/50 last:border-0">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-cyan-400 font-mono">{t.numero_ticket}</span>
-                    <span className="text-sm text-slate-200 truncate max-w-[200px]">{t.titulo}</span>
-                  </div>
-                  <span className={`text-xs capitalize ${estadoColors[t.estado] || 'text-slate-400'}`}>{t.estado?.replace('_', ' ')}</span>
-                </div>
-              )
-            })}
-          </div>
-        </motion.div>
-
-        {/* Incidencias by Severity */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.1 }}
-          className="bg-zinc-900/50 border border-slate-800 rounded-lg p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-red-400" /> Incidencias por Severidad</h2>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { key: 'baja', label: 'Baja', color: 'text-slate-400', bg: 'bg-slate-400/10', border: 'border-slate-500/20' },
-              { key: 'media', label: 'Media', color: 'text-yellow-400', bg: 'bg-yellow-400/10', border: 'border-yellow-500/20' },
-              { key: 'alta', label: 'Alta', color: 'text-orange-400', bg: 'bg-orange-400/10', border: 'border-orange-500/20' },
-              { key: 'critica', label: 'Crítica', color: 'text-red-400', bg: 'bg-red-400/10', border: 'border-red-500/20' },
-            ].map(s => {
-              const count = data.incidencias.bySeverity.find(i => i.severidad === s.key)?.count || 0
-              return (
-                <div key={s.key} className={`${s.bg} border ${s.border} rounded-lg p-3 text-center`}>
-                  <p className={`text-2xl font-bold ${s.color}`}>{count}</p>
-                  <p className="text-xs text-slate-400 mt-1">{s.label}</p>
-                </div>
-              )
-            })}
-          </div>
-        </motion.div>
-
-        {/* Cotizaciones pipeline */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }}
-          className="bg-zinc-900/50 border border-slate-800 rounded-lg p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2"><ShoppingCart className="h-4 w-4 text-emerald-400" /> Pipeline de Ventas</h2>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { key: 'borrador', label: 'Borrador', color: 'text-slate-400', border: 'border-slate-500/20' },
-              { key: 'enviada', label: 'Enviadas', color: 'text-blue-400', border: 'border-blue-500/20' },
-              { key: 'aceptada', label: 'Aceptadas', color: 'text-green-400', border: 'border-green-500/20' },
-              { key: 'rechazada', label: 'Rechazadas', color: 'text-red-400', border: 'border-red-500/20' },
-            ].map(s => {
-              const count = getCount(data.ventas.byEstado, s.key)
-              return (
-                <div key={s.key} className={`bg-zinc-900 border ${s.border} rounded-lg p-3 text-center`}>
-                  <p className={`text-2xl font-bold ${s.color}`}>{count}</p>
-                  <p className="text-xs text-slate-400 mt-1">{s.label}</p>
-                </div>
-              )
-            })}
+                <span className={`px-2 py-1 rounded-lg text-[10px] font-medium ${statusColors[String(o.status)]} text-white`}>
+                  {statusLabels[String(o.status)] || String(o.status)}
+                </span>
+              </div>
+            ))}
           </div>
         </motion.div>
       </div>
+
+      {/* Incidents */}
+      {data.recentIncidents && data.recentIncidents.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}
+          className="bg-zinc-900/60 border border-red-500/20 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2"><AlertTriangle className="h-4 w-4" /> Incidencias Recientes</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {data.recentIncidents.map((inc, i) => {
+              const sevColors: Record<string, string> = { critical: 'text-red-400 bg-red-500/10', high: 'text-orange-400 bg-orange-500/10', medium: 'text-yellow-400 bg-yellow-500/10', low: 'text-slate-400 bg-slate-500/10' }
+              return (
+                <div key={i} className="bg-zinc-800/40 border border-slate-700/30 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${sevColors[String(inc.severity)] || sevColors.medium}`}>{String(inc.severity)}</span>
+                    <span className={`text-[10px] ${String(inc.status) === 'open' ? 'text-yellow-400' : 'text-green-400'}`}>{String(inc.status)}</span>
+                  </div>
+                  <p className="text-sm text-slate-200">{String(inc.title)}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">{String(inc.reported_by_name)} · {new Date(String(inc.created_at)).toLocaleDateString('es-MX')}</p>
+                </div>
+              )
+            })}
+          </div>
+        </motion.div>
+      )}
     </div>
   )
 }

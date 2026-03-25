@@ -9,100 +9,160 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
   try {
-    // Tickets stats
-    const ticketStats = await sql`
-      SELECT estado, COUNT(*)::int as count FROM tickets GROUP BY estado`
-    const ticketsByType = await sql`
-      SELECT tipo, COUNT(*)::int as count FROM tickets GROUP BY tipo ORDER BY count DESC`
-    const ticketsByPriority = await sql`
-      SELECT prioridad, COUNT(*)::int as count FROM tickets GROUP BY prioridad`
-    const ticketsByCity = await sql`
-      SELECT ciudad, COUNT(*)::int as count FROM tickets WHERE ciudad IS NOT NULL GROUP BY ciudad ORDER BY count DESC LIMIT 5`
+    // Get user's org
+    const users = await sql`SELECT org_id, role, default_branch_id FROM users WHERE email = ${session.user.email}` as Record<string, unknown>[]
+    if (users.length === 0) return NextResponse.json({ error: 'Usuario no configurado' }, { status: 403 })
+    const user = users[0]
+    const orgId = user.org_id as string
 
-    // Incidencias
-    const incidenciaStats = await sql`
-      SELECT estado, COUNT(*)::int as count FROM incidencias GROUP BY estado`
-    const incidenciasBySeverity = await sql`
-      SELECT severidad, COUNT(*)::int as count FROM incidencias GROUP BY severidad`
+    // KPIs
+    const [ordersStats] = await sql`
+      SELECT
+        COUNT(*) FILTER (WHERE status IN ('created','assigned','in_progress')) AS active_orders,
+        COUNT(*) FILTER (WHERE status = 'completed' AND completed_at >= CURRENT_DATE - INTERVAL '7 days') AS completed_week,
+        COUNT(*) FILTER (WHERE status = 'in_progress') AS in_progress,
+        COUNT(*) FILTER (WHERE priority = 'urgent' AND status NOT IN ('completed','closed')) AS urgent
+      FROM service_orders WHERE org_id = ${orgId}
+    ` as Record<string, unknown>[]
 
-    // Evidencias
-    const totalEvidencias = await sql`SELECT COUNT(*)::int as count FROM evidencias` as Record<string, unknown>[]
+    const [inventoryStats] = await sql`
+      SELECT
+        COUNT(*) FILTER (WHERE stock_qty <= min_stock AND min_stock > 0) AS low_stock_items,
+        COUNT(*) AS total_items
+      FROM inventory_items WHERE org_id = ${orgId}
+    ` as Record<string, unknown>[]
 
-    // Activos
-    const activoStats = await sql`
-      SELECT estado, COUNT(*)::int as count FROM activos_fijos GROUP BY estado`
-    const activoTotal = await sql`
-      SELECT COALESCE(SUM(valor_adquisicion), 0)::numeric as total FROM activos_fijos` as Record<string, unknown>[]
+    const [vehicleStats] = await sql`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'active') AS active_vehicles,
+        COUNT(*) FILTER (WHERE status = 'in_shop') AS in_shop,
+        COUNT(*) FILTER (WHERE insurance_expiry <= CURRENT_DATE + INTERVAL '30 days') AS insurance_alert
+      FROM vehicles WHERE org_id = ${orgId}
+    ` as Record<string, unknown>[]
 
-    // Materiales
-    const materialesLowStock = await sql`
-      SELECT nombre, stock_actual, stock_minimo FROM materiales WHERE stock_actual <= stock_minimo AND stock_minimo > 0`
-    const totalMateriales = await sql`SELECT COUNT(*)::int as count FROM materiales` as Record<string, unknown>[]
+    const [toolStats] = await sql`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'in_maintenance') AS in_maintenance,
+        COUNT(*) FILTER (WHERE status = 'assigned') AS assigned,
+        COUNT(*) AS total
+      FROM tools WHERE org_id = ${orgId}
+    ` as Record<string, unknown>[]
 
-    // Flota
-    const vehiculoStats = await sql`
-      SELECT estado, COUNT(*)::int as count FROM vehiculos GROUP BY estado`
-    const totalCombustible = await sql`
-      SELECT COALESCE(SUM(costo_total), 0)::numeric as total FROM vehiculo_combustible` as Record<string, unknown>[]
-    const totalMantenimiento = await sql`
-      SELECT COALESCE(SUM(costo), 0)::numeric as total FROM vehiculo_mantenimientos` as Record<string, unknown>[]
-    const totalMultas = await sql`
-      SELECT COALESCE(SUM(monto), 0)::numeric as total FROM vehiculo_multas` as Record<string, unknown>[]
-    const multasPendientes = await sql`
-      SELECT COUNT(*)::int as count FROM vehiculo_multas WHERE estado = 'pendiente'` as Record<string, unknown>[]
+    const [incidentStats] = await sql`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'open') AS open_incidents,
+        COUNT(*) FILTER (WHERE severity IN ('high','critical') AND status = 'open') AS critical
+      FROM incidents WHERE org_id = ${orgId}
+    ` as Record<string, unknown>[]
 
-    // Ventas
-    const cotizacionStats = await sql`
-      SELECT estado, COUNT(*)::int as count FROM cotizaciones GROUP BY estado`
-    const cotizacionesTotal = await sql`
-      SELECT COALESCE(SUM(total), 0)::numeric as total FROM cotizaciones WHERE estado = 'aceptada'` as Record<string, unknown>[]
+    const [employeeStats] = await sql`
+      SELECT COUNT(*) AS total_employees
+      FROM employees WHERE org_id = ${orgId} AND active = true
+    ` as Record<string, unknown>[]
 
-    // Facturación
-    const facturaStats = await sql`
-      SELECT estado, COUNT(*)::int as count FROM facturas GROUP BY estado`
-    const facturaPendiente = await sql`
-      SELECT COALESCE(SUM(total), 0)::numeric as total FROM facturas WHERE estado = 'pendiente'` as Record<string, unknown>[]
-    const facturaCobrada = await sql`
-      SELECT COALESCE(SUM(total), 0)::numeric as total FROM facturas WHERE estado = 'pagada'` as Record<string, unknown>[]
+    const [expenseStats] = await sql`
+      SELECT
+        COALESCE(SUM(amount), 0) AS total_expenses_month
+      FROM operational_expenses
+      WHERE org_id = ${orgId} AND date >= date_trunc('month', CURRENT_DATE)
+    ` as Record<string, unknown>[]
 
-    // Monthly revenue (facturas pagadas por mes)
-    const monthlyRevenue = await sql`
-      SELECT TO_CHAR(fecha_pago, 'YYYY-MM') as mes, COALESCE(SUM(total), 0)::numeric as total
-      FROM facturas WHERE estado = 'pagada' AND fecha_pago IS NOT NULL
-      GROUP BY mes ORDER BY mes DESC LIMIT 6`
+    // Orders by status
+    const ordersByStatus = await sql`
+      SELECT status, COUNT(*) AS count
+      FROM service_orders WHERE org_id = ${orgId}
+      GROUP BY status ORDER BY count DESC
+    `
 
-    // Recent activity
-    const recentTickets = await sql`
-      SELECT numero_ticket, titulo, estado, created_at FROM tickets ORDER BY created_at DESC LIMIT 5`
+    // Orders by type
+    const ordersByType = await sql`
+      SELECT service_type, COUNT(*) AS count
+      FROM service_orders WHERE org_id = ${orgId}
+      GROUP BY service_type ORDER BY count DESC
+    `
 
-    // Usuarios activos
-    const totalUsuarios = await sql`SELECT COUNT(*)::int as count FROM usuarios WHERE activo = true` as Record<string, unknown>[]
+    // Orders by branch
+    const ordersByBranch = await sql`
+      SELECT b.name AS branch, COUNT(so.id) AS count
+      FROM service_orders so JOIN branches b ON so.branch_id = b.id
+      WHERE so.org_id = ${orgId}
+      GROUP BY b.name ORDER BY count DESC
+    `
+
+    // Recent orders
+    const recentOrders = await sql`
+      SELECT so.order_number, so.title, so.status, so.priority, so.service_type,
+             so.client_name, so.scheduled_date, so.created_at, b.name AS branch_name
+      FROM service_orders so
+      JOIN branches b ON so.branch_id = b.id
+      WHERE so.org_id = ${orgId}
+      ORDER BY so.created_at DESC LIMIT 10
+    `
+
+    // Recent incidents
+    const recentIncidents = await sql`
+      SELECT i.title, i.severity, i.status, i.type, i.created_at,
+             u.full_name AS reported_by_name
+      FROM incidents i
+      LEFT JOIN users u ON i.reported_by = u.id
+      WHERE i.org_id = ${orgId}
+      ORDER BY i.created_at DESC LIMIT 5
+    `
+
+    // Fleet costs (last 3 months)
+    const fleetCosts = await sql`
+      SELECT
+        COALESCE((SELECT SUM(total_cost) FROM vehicle_fuel_logs vfl
+          JOIN vehicles v ON vfl.vehicle_id = v.id
+          WHERE v.org_id = ${orgId} AND vfl.date >= CURRENT_DATE - INTERVAL '90 days'), 0) AS fuel_cost,
+        COALESCE((SELECT SUM(cost) FROM vehicle_maintenances vm
+          JOIN vehicles v ON vm.vehicle_id = v.id
+          WHERE v.org_id = ${orgId} AND vm.date_performed >= CURRENT_DATE - INTERVAL '90 days'), 0) AS maint_cost,
+        COALESCE((SELECT SUM(amount) FROM vehicle_fines vf
+          JOIN vehicles v ON vf.vehicle_id = v.id
+          WHERE v.org_id = ${orgId} AND vf.date >= CURRENT_DATE - INTERVAL '90 days'), 0) AS fines_cost
+    ` as Record<string, unknown>[]
+
+    // Revenue vs Cost (completed orders)
+    const [revenueCosts] = await sql`
+      SELECT
+        COALESCE(SUM(quoted_amount), 0) AS total_revenue,
+        COALESCE((SELECT SUM(amount) FROM service_order_costs soc
+          JOIN service_orders so2 ON soc.order_id = so2.id
+          WHERE so2.org_id = ${orgId}), 0) AS total_costs
+      FROM service_orders
+      WHERE org_id = ${orgId} AND status IN ('completed', 'closed')
+    ` as Record<string, unknown>[]
 
     return NextResponse.json({
-      tickets: { byEstado: ticketStats, byType: ticketsByType, byPriority: ticketsByPriority, byCity: ticketsByCity },
-      incidencias: { byEstado: incidenciaStats, bySeverity: incidenciasBySeverity },
-      evidencias: { total: (totalEvidencias[0]?.count as number) || 0 },
-      activos: { byEstado: activoStats, valorTotal: Number(activoTotal[0]?.total) || 0 },
-      materiales: { total: (totalMateriales[0]?.count as number) || 0, lowStock: materialesLowStock },
-      flota: {
-        byEstado: vehiculoStats,
-        gastoCombustible: Number(totalCombustible[0]?.total) || 0,
-        gastoMantenimiento: Number(totalMantenimiento[0]?.total) || 0,
-        gastoMultas: Number(totalMultas[0]?.total) || 0,
-        multasPendientes: (multasPendientes[0]?.count as number) || 0,
+      user: { role: user.role, branch_id: user.default_branch_id },
+      kpis: {
+        active_orders: ordersStats.active_orders,
+        completed_week: ordersStats.completed_week,
+        in_progress: ordersStats.in_progress,
+        urgent: ordersStats.urgent,
+        low_stock: inventoryStats.low_stock_items,
+        total_items: inventoryStats.total_items,
+        active_vehicles: vehicleStats.active_vehicles,
+        vehicles_in_shop: vehicleStats.in_shop,
+        insurance_alerts: vehicleStats.insurance_alert,
+        tools_maintenance: toolStats.in_maintenance,
+        tools_assigned: toolStats.assigned,
+        tools_total: toolStats.total,
+        open_incidents: incidentStats.open_incidents,
+        critical_incidents: incidentStats.critical,
+        total_employees: employeeStats.total_employees,
+        expenses_month: expenseStats.total_expenses_month,
+        total_revenue: revenueCosts.total_revenue,
+        total_costs: revenueCosts.total_costs,
       },
-      ventas: { byEstado: cotizacionStats, totalAceptadas: Number(cotizacionesTotal[0]?.total) || 0 },
-      facturacion: {
-        byEstado: facturaStats,
-        porCobrar: Number(facturaPendiente[0]?.total) || 0,
-        cobrado: Number(facturaCobrada[0]?.total) || 0,
-        monthlyRevenue,
-      },
-      recentTickets,
-      totalUsuarios: (totalUsuarios[0]?.count as number) || 0,
+      charts: { ordersByStatus, ordersByType, ordersByBranch },
+      fleet: fleetCosts[0],
+      recentOrders,
+      recentIncidents,
     })
   } catch (error) {
-    console.error('[API] Dashboard error:', error)
-    return NextResponse.json({ error: 'Error al obtener datos del dashboard' }, { status: 500 })
+    console.error('[Dashboard API]', error)
+    return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }
 }
