@@ -17,7 +17,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [])
 
   // Don't show sidebar on login page
-  if (pathname === '/login') {
+  if (pathname === '/login' || pathname === '/proyecto') {
     return <>{children}</>
   }
 
